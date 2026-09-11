@@ -18,6 +18,7 @@ import {
 import { formatPrecio } from '../domain/cartaRules'
 import { CartaPreviewCarritoView } from './CartaPreviewCarritoView'
 import { CartaPreviewOpcionesDialog } from './CartaPreviewOpcionesDialog'
+import { CartaProductoEtiquetaBadge } from './CartaProductoEtiquetaBadge'
 
 interface CartaPreviewDialogProps {
   open: boolean
@@ -71,6 +72,9 @@ function PreviewProducto({
               Agotado
             </span>
           ) : null}
+          {producto.etiquetas.map((etiqueta) => (
+            <CartaProductoEtiquetaBadge key={etiqueta} etiqueta={etiqueta} />
+          ))}
         </div>
         {producto.descripcion ? (
           <p className="line-clamp-2 text-sm text-muted-foreground">{producto.descripcion}</p>

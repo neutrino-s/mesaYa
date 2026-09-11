@@ -1,4 +1,4 @@
-import type { CartaProductoGrupoOpciones } from '@/types/cartaProducto'
+import type { CartaProductoEtiqueta, CartaProductoGrupoOpciones } from '@/types/cartaProducto'
 
 export interface CartaSeccionFormValues {
   nombre: string
@@ -17,4 +17,7 @@ export interface CartaProductoFormValues {
   /** Habilita el campo de comentario libre para el comensal (ej. "sin
    * sal"); estado local, mismo criterio que `gruposOpciones`. */
   permiteComentarios: boolean
+  /** Etiquetas fijas del plato (ej. vegano, nuevo); estado local, mismo
+   * criterio que `gruposOpciones`. */
+  etiquetas: CartaProductoEtiqueta[]
 }

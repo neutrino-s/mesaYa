@@ -81,6 +81,7 @@ export const cartaProductoRepository = {
       agotado: false,
       gruposOpciones: input.gruposOpciones,
       permiteComentarios: input.permiteComentarios,
+      etiquetas: input.etiquetas,
     })
   },
 
@@ -100,6 +101,7 @@ export const cartaProductoRepository = {
       imagenUrl,
       gruposOpciones: input.gruposOpciones,
       permiteComentarios: input.permiteComentarios,
+      etiquetas: input.etiquetas,
     })
   },
 

@@ -16,9 +16,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { CartaProducto, CartaProductoGrupoOpciones } from '@/types/cartaProducto'
+import { cn } from '@/lib/utils'
+import type { CartaProducto, CartaProductoEtiqueta, CartaProductoGrupoOpciones } from '@/types/cartaProducto'
 
 import { cartaProductoSchema, type CartaProductoFormSchema } from '../domain/cartaProductoSchema'
+import { ETIQUETAS_DISPONIBLES, ETIQUETA_CLASSNAME, ETIQUETA_LABEL } from '../domain/cartaProductoEtiquetas'
 import { maskPrecioInput, precioInicialInput } from '../domain/cartaRules'
 import { useCreateCartaProducto } from '../hooks/useCreateCartaProducto'
 import { useUpdateCartaProducto } from '../hooks/useUpdateCartaProducto'
@@ -73,6 +75,13 @@ export function CartaProductoFormDialog({
     producto?.gruposOpciones ?? [],
   )
   const [permiteComentarios, setPermiteComentarios] = useState(producto?.permiteComentarios ?? false)
+  const [etiquetas, setEtiquetas] = useState<CartaProductoEtiqueta[]>(producto?.etiquetas ?? [])
+
+  function toggleEtiqueta(etiqueta: CartaProductoEtiqueta) {
+    setEtiquetas((actuales) =>
+      actuales.includes(etiqueta) ? actuales.filter((item) => item !== etiqueta) : [...actuales, etiqueta],
+    )
+  }
 
   const {
     register,
@@ -102,7 +111,7 @@ export function CartaProductoFormDialog({
   }
 
   async function onSubmit(values: CartaProductoFormSchema) {
-    const valuesConOpciones = { ...values, gruposOpciones, permiteComentarios }
+    const valuesConOpciones = { ...values, gruposOpciones, permiteComentarios, etiquetas }
 
     if (isEditing && producto) {
       await updateProducto.mutateAsync({
@@ -200,6 +209,31 @@ export function CartaProductoFormDialog({
             {errors.precio ? (
               <p className="text-xs text-destructive">{errors.precio.message}</p>
             ) : null}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Etiquetas</Label>
+            <div className="flex flex-wrap gap-2">
+              {ETIQUETAS_DISPONIBLES.map((etiqueta) => {
+                const seleccionada = etiquetas.includes(etiqueta)
+                return (
+                  <button
+                    key={etiqueta}
+                    type="button"
+                    aria-pressed={seleccionada}
+                    onClick={() => toggleEtiqueta(etiqueta)}
+                    className={cn(
+                      'rounded-md px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors',
+                      seleccionada
+                        ? cn(ETIQUETA_CLASSNAME[etiqueta], 'ring-transparent')
+                        : 'text-muted-foreground ring-border hover:bg-muted/60',
+                    )}
+                  >
+                    {ETIQUETA_LABEL[etiqueta]}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">

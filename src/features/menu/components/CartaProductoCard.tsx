@@ -6,6 +6,7 @@ import type { CartaProducto } from '@/types/cartaProducto'
 
 import { formatPrecio } from '../domain/cartaRules'
 import { contarOpcionesConfigurables } from '../domain/opcionesRules'
+import { CartaProductoEtiquetaBadge } from './CartaProductoEtiquetaBadge'
 
 interface CartaProductoCardProps {
   producto: CartaProducto
@@ -39,6 +40,9 @@ export function CartaProductoCard({ producto, onEdit, onDelete, onToggleAgotado 
             {producto.nombre || <span className="text-muted-foreground italic">Sin nombre</span>}
           </h4>
           {producto.agotado ? <Badge className="bg-destructive/10 text-destructive">Agotado</Badge> : null}
+          {producto.etiquetas.map((etiqueta) => (
+            <CartaProductoEtiquetaBadge key={etiqueta} etiqueta={etiqueta} />
+          ))}
           {producto.gruposOpciones.length > 0 ? (
             <Badge
               className="bg-muted text-muted-foreground"

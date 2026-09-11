@@ -1,6 +1,12 @@
 import type { FirestoreDataConverter, QueryDocumentSnapshot, SnapshotOptions } from 'firebase/firestore'
 
 /**
+ * Etiqueta fija del plato (ej. "Vegano", "Nuevo") — lista cerrada, no texto
+ * libre. Ver labels/colores en `features/menu/domain/cartaProductoEtiquetas.ts`.
+ */
+export type CartaProductoEtiqueta = 'sinTacc' | 'vegano' | 'masSolicitado' | 'nuevo'
+
+/**
  * Grupo de opciones configurables de un plato (ej. "Salsa", "Guarnición").
  * Anidado dentro de `CartaProducto.gruposOpciones` — no es su propia
  * colección de Firestore, ver `docs/database-schema.md#carta---producto`.
@@ -54,6 +60,8 @@ export interface CartaProducto {
    * este plato (ej. "sin sal"). `false` por defecto — no todos los platos
    * necesitan esta opción. */
   permiteComentarios: boolean
+  /** Etiquetas fijas del plato (ej. vegano, nuevo); `[]` si no tiene ninguna. */
+  etiquetas: CartaProductoEtiqueta[]
 }
 
 export const cartaProductoConverter: FirestoreDataConverter<CartaProducto> = {
@@ -69,6 +77,7 @@ export const cartaProductoConverter: FirestoreDataConverter<CartaProducto> = {
       agotado: producto.agotado,
       gruposOpciones: producto.gruposOpciones,
       permiteComentarios: producto.permiteComentarios,
+      etiquetas: producto.etiquetas,
     }
   },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): CartaProducto {
@@ -86,6 +95,7 @@ export const cartaProductoConverter: FirestoreDataConverter<CartaProducto> = {
       // `?? []`/`?? false` para platos creados antes de sumar esta funcionalidad.
       gruposOpciones: data.gruposOpciones ?? [],
       permiteComentarios: data.permiteComentarios ?? false,
+      etiquetas: data.etiquetas ?? [],
     }
   },
 }

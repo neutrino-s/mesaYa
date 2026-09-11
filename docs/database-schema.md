@@ -304,6 +304,7 @@ nuevo, deja intactas las que siguen vigentes, y recién ahí actualiza
 | agotado | boolean | marcado a demanda desde la tarjeta del plato ("Marcar agotado"); no borra el plato, solo lo saca de disponible |
 | gruposOpciones | `GrupoOpciones[]` | grupos de opciones configurables del plato (salsas, guarniciones, adicionales, puntos de cocción); `[]` si no tiene ninguno — ver detalle abajo |
 | permiteComentarios | boolean | si es `true`, el comensal ve un campo de texto libre para aclarar algo del plato (ej. "sin sal") al pedirlo; `false` por defecto |
+| etiquetas | `EtiquetaProducto[]` | lista cerrada (no texto libre): `'sinTacc' \| 'vegano' \| 'masSolicitado' \| 'nuevo'`; `[]` si no tiene ninguna — se muestran como badges de color en la carta, ver `features/menu/domain/cartaProductoEtiquetas.ts` |
 
 ```json
 {
@@ -315,13 +316,16 @@ nuevo, deja intactas las que siguen vigentes, y recién ahí actualiza
   "orden": 0,
   "agotado": false,
   "gruposOpciones": [],
-  "permiteComentarios": false
+  "permiteComentarios": false,
+  "etiquetas": ["nuevo"]
 }
 ```
 
 **`gruposOpciones`** — array embebido en el propio documento del producto (no es subcolección ni colección aparte): cada elemento es un `GrupoOpciones`, y cada opción dentro de un grupo puede a su vez abrir sus propios `subgrupos` (mismo tipo, recursivo). Pensado para casos como "Salsa" (varias salsas a distinto precio), "Guarnición" (donde, por ejemplo, la opción "Ensalada" ofrece a su vez un grupo de aderezos) o "Punto de cocción" (lista fija de puntos que sí maneja el local — bife jugoso/a punto/bien cocido — marcado como `obligatorio` para forzar que el comensal elija uno antes de poder pedir el plato, en vez de escribirlo libremente y arriesgarse a pedir un punto que no se hace).
 
 **`permiteComentarios`** es un campo aparte, independiente de `gruposOpciones`: habilita un campo de texto libre (sin opciones predefinidas) para aclaraciones que no entran en una lista cerrada, ej. "sin sal", "bien picante". Un mismo plato puede combinar ambos: un grupo obligatorio de "Punto de cocción" (para forzar una respuesta dentro de lo que el local ofrece) y además `permiteComentarios` habilitado (para una aclaración libre adicional).
+
+**`etiquetas`** son marcas visuales fijas del plato (sin impacto en precio ni en el pedido, a diferencia de `gruposOpciones`): se elige un subconjunto de un enum cerrado desde el form de alta/edición (chips seleccionables) y se pintan como badges de color en la carta del panel admin y en la previsualización del comensal. El set inicial es `sinTacc`, `vegano`, `masSolicitado`, `nuevo` — sumar una etiqueta nueva implica extender el enum `EtiquetaProducto` y su color/label en `cartaProductoEtiquetas.ts`, no agregar texto libre.
 
 ```ts
 interface GrupoOpciones {
