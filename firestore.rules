@@ -1,0 +1,242 @@
+rules_version = '2';
+
+// Estructura (ver src/types/firestoreRefs.ts, fuente de verdad del shape):
+//
+// restaurantes/{restauranteId}                              -> Restaurante
+// restaurantes/{restauranteId}/salones/{salonId}             -> Salon
+// restaurantes/{restauranteId}/salones/{salonId}/mesas/{id}  -> Mesa
+// restaurantes/{restauranteId}/cartaSecciones/{seccionId}    -> CartaSeccion
+// restaurantes/{restauranteId}/cartaProductos/{productoId}   -> CartaProducto
+// restaurantes/{restauranteId}/asignaciones/{asignacionId}   -> Asignacion
+// restaurantes/{restauranteId}/reservas/{reservaId}          -> Reserva
+// restaurantes/{restauranteId}/pedidos/{pedidoId}            -> Pedido
+// restaurantes/{restauranteId}/turnosAsignados/{turnoId}     -> TurnoAsignado
+// restaurantes/{restauranteId}/fichajes/{fichajeId}          -> Fichaje
+// restaurantes/{restauranteId}/solicitudes/{solicitudId}     -> Solicitud
+// restaurantes/{restauranteId}/notificaciones/{notifId}      -> Notificacion
+// restaurantes/{restauranteId}/staff/{authUid}               -> Staff (el id del doc ES el uid de Firebase Auth)
+// staffIndex/{authUid}                                       -> { restauranteId } (ver docs/database-schema.md#staff)
+// qrCodes/{qrToken}                                          -> QrCode
+//
+// El registro de un restaurante nuevo (ver registerRepository.ts) crea el
+// doc de `restaurantes`, su primer `staff` (rol administrador) y su
+// `staffIndex` en un mismo batch, ya autenticado. El alta de cualquier otro
+// staff pasa exclusivamente por la Cloud Function callable `crearStaff`
+// (Admin SDK, bypasea estas reglas) porque además crea la cuenta de Auth del
+// colaborador con una contraseña provisoria.
+//
+// `staffIndex` es una colección raíz auxiliar e inmutable: permite resolver
+// "a qué restaurante pertenezco" con un `get()` directo sin conocer el
+// `restauranteId` de antemano (necesario al iniciar sesión), y preserva acá
+// abajo la guarda de "no crear un segundo restaurante si ya soy staff de
+// otro" — algo que ya no sería expresable como `exists()` de ruta literal
+// una vez que `staff` quedó anidado bajo `restaurantes`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function ownStaffDoc(restauranteId) {
+      return get(/databases/$(database)/documents/restaurantes/$(restauranteId)/staff/$(request.auth.uid));
+    }
+
+    function isStaffOf(restauranteId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/restaurantes/$(restauranteId)/staff/$(request.auth.uid)) &&
+        ownStaffDoc(restauranteId).data.estado == 'activo';
+    }
+
+    function isAdminOf(restauranteId) {
+      return isStaffOf(restauranteId) && ownStaffDoc(restauranteId).data.rol == 'administrador';
+    }
+
+    // A diferencia de `isAdminOf` (solo `administrador`), el cuadrante de
+    // turnos también lo arma el `encargado` — acotado a esta colección para
+    // no ampliar el resto de los permisos de ese rol.
+    function canGestionarTurnos(restauranteId) {
+      return isStaffOf(restauranteId) &&
+        ownStaffDoc(restauranteId).data.rol in ['administrador', 'encargado'];
+    }
+
+    // Rol de un staff arbitrario (no necesariamente `request.auth.uid`) —
+    // usado para validar, al crear una `Notificacion`, que el destinatario
+    // declarado realmente puede gestionar el cuadrante (ver `notificaciones`
+    // más abajo). Asume que `staffId` existe: solo se llama después de un
+    // `exists()`/`isStaffOf` sobre el mismo id.
+    function rolDe(restauranteId, staffId) {
+      return get(/databases/$(database)/documents/restaurantes/$(restauranteId)/staff/$(staffId)).data.rol;
+    }
+
+    match /staffIndex/{uid} {
+      allow read: if isSignedIn() && uid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['restauranteId']);
+      allow update, delete: if false;
+    }
+
+    match /restaurantes/{restauranteId} {
+      allow read: if isStaffOf(restauranteId);
+      // Solo se crea desde el flujo de registro, con la cuenta recién creada
+      // y todavía sin ningún restaurante propio.
+      allow create: if isSignedIn() &&
+        !exists(/databases/$(database)/documents/staffIndex/$(request.auth.uid));
+      allow update, delete: if isAdminOf(restauranteId);
+
+      match /salones/{salonId} {
+        allow read: if isStaffOf(restauranteId);
+        allow write: if isAdminOf(restauranteId);
+
+        match /mesas/{mesaId} {
+          allow read: if isStaffOf(restauranteId);
+          // El mozo actualiza el estado de sus mesas; solo el admin las crea,
+          // edita el diseño (número/capacidad/forma/posición) o las borra.
+          // `mozoIds` queda afuera: se escribe únicamente vía las Cloud
+          // Functions `asignarMozoAMesa`/`liberarMesa` (Admin SDK, bypasea
+          // esta regla) para mantener consistente el historial en
+          // `asignaciones` — el cliente nunca lo toca directo.
+          allow update: if isStaffOf(restauranteId) &&
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['mozoIds']);
+          allow create, delete: if isAdminOf(restauranteId);
+        }
+      }
+
+      match /cartaSecciones/{seccionId} {
+        allow read: if isStaffOf(restauranteId);
+        allow write: if isAdminOf(restauranteId);
+      }
+
+      match /cartaProductos/{productoId} {
+        allow read: if isStaffOf(restauranteId);
+        allow write: if isAdminOf(restauranteId);
+      }
+
+      match /asignaciones/{asignacionId} {
+        // Historial de mozo↔mesa: lo escribe únicamente la Cloud Function
+        // `asignarMozoAMesa`/`liberarMesa` (Admin SDK, bypasea esta regla).
+        allow read: if isStaffOf(restauranteId);
+        allow write: if false;
+      }
+
+      match /reservas/{reservaId} {
+        allow read, write: if isStaffOf(restauranteId);
+      }
+
+      match /pedidos/{pedidoId} {
+        // La máquina de estados (qué transición puntual puede disparar cada
+        // rol) se valida en `features/orders/domain/pedidoRules.ts`, no acá
+        // — ver `docs/database-schema.md#pedido--comanda`. Cualquier staff
+        // activo del restaurante puede leer/escribir; scripts de seed usan
+        // Admin SDK y bypasean esta regla como cualquier otro script.
+        allow read, create, update: if isStaffOf(restauranteId);
+        allow delete: if isAdminOf(restauranteId);
+      }
+
+      match /turnosAsignados/{turnoId} {
+        // Todo el staff activo ve el cuadrante completo (necesita ver a sus
+        // compañeros para pedir cambios de turno); solo admin/encargado lo
+        // edita — ver `canGestionarTurnos`.
+        allow read: if isStaffOf(restauranteId);
+        allow write: if canGestionarTurnos(restauranteId);
+      }
+
+      match /fichajes/{fichajeId} {
+        // Cualquier staff activo ve todos los fichajes: el encargado necesita
+        // la tabla de "fichajes de hoy" del equipo completo, y cada
+        // colaborador su propio historial.
+        allow read: if isStaffOf(restauranteId);
+        // Fichar es siempre sobre uno mismo — no existe "fichar a nombre de
+        // otro" (ver `docs/database-schema.md#fichaje`).
+        allow create: if isStaffOf(restauranteId) && request.resource.data.staffId == request.auth.uid;
+        // Único update permitido: cerrar la propia jornada abierta (setear
+        // `salida`). El resto de los campos son inmutables tras la creación.
+        allow update: if isStaffOf(restauranteId) &&
+          resource.data.staffId == request.auth.uid &&
+          resource.data.salida == null &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['salida', 'updatedAt']);
+        allow delete: if false;
+      }
+
+      match /solicitudes/{solicitudId} {
+        // Cada empleado ve las propias; quien gestiona el cuadrante ve
+        // todas (cola de aprobación). A diferencia de `turnosAsignados`/
+        // `fichajes`, acá no hay visibilidad de equipo completo para el
+        // staff común — el motivo de una licencia es un dato sensible.
+        allow read: if isStaffOf(restauranteId) &&
+          (resource.data.staffId == request.auth.uid || canGestionarTurnos(restauranteId));
+        allow create: if isStaffOf(restauranteId) &&
+          request.resource.data.staffId == request.auth.uid &&
+          request.resource.data.estado == 'pendiente';
+        // El empleado puede retirar su propio pedido mientras siga pendiente.
+        allow delete: if isStaffOf(restauranteId) &&
+          resource.data.staffId == request.auth.uid &&
+          resource.data.estado == 'pendiente';
+        // Aprobar/rechazar: solo quien gestiona el cuadrante, solo sobre un
+        // pedido todavía pendiente, y solo esos campos — el resto queda
+        // inmutable una vez creado.
+        allow update: if canGestionarTurnos(restauranteId) &&
+          resource.data.estado == 'pendiente' &&
+          request.resource.data.estado in ['aprobada', 'rechazada'] &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['estado', 'respuestaAdmin', 'resueltoPor', 'resueltoEn', 'turnosAsignadosIdsCancelados']);
+      }
+
+      match /notificaciones/{notificacionId} {
+        // Cada quien solo ve y marca como leídas sus propias notificaciones
+        // — no hay visibilidad de equipo (ver `docs/database-schema.md#notificación`).
+        allow read: if isStaffOf(restauranteId) &&
+          resource.data.destinatarioStaffId == request.auth.uid;
+        // El propio destinatario solo puede tocar `leida`; el resto del doc
+        // es inmutable tras crearse.
+        allow update: if isStaffOf(restauranteId) &&
+          resource.data.destinatarioStaffId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leida']);
+        // Quien crea la notificación no es necesariamente el destinatario
+        // (el solicitante notifica al admin/encargado; el admin/encargado
+        // notifica al solicitante), así que el `tipo` declarado tiene que
+        // ser consistente con el rol real de ambas puntas — sin esto,
+        // cualquier staff podría escribirle una notificación falsa a
+        // cualquier otro.
+        allow create: if isStaffOf(restauranteId) &&
+          request.resource.data.restauranteId == restauranteId &&
+          request.resource.data.leida == false &&
+          (
+            (request.resource.data.tipo == 'solicitud_creada' &&
+              rolDe(restauranteId, request.resource.data.destinatarioStaffId) in ['administrador', 'encargado']) ||
+            (request.resource.data.tipo == 'solicitud_resuelta' &&
+              canGestionarTurnos(restauranteId))
+          );
+        allow delete: if false;
+      }
+
+      match /staff/{staffId} {
+        allow read: if isSignedIn() &&
+          (staffId == request.auth.uid || isStaffOf(restauranteId));
+        // Única alta directa desde el cliente: la autoalta del admin al
+        // registrarse. Cualquier otro colaborador se da de alta con la
+        // Cloud Function callable `crearStaff` (Admin SDK, bypasea rules),
+        // porque también crea la cuenta de Auth del colaborador.
+        allow create: if isSignedIn() &&
+          staffId == request.auth.uid &&
+          request.resource.data.authUid == request.auth.uid;
+        // El propio staff solo puede tocar `debeCambiarPassword` (y solo
+        // para apagarlo, al completar el cambio de contraseña obligatorio
+        // de su primer login); el resto de los campos son del admin.
+        allow update: if isAdminOf(restauranteId) ||
+          (staffId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['debeCambiarPassword']) &&
+            request.resource.data.debeCambiarPassword == false);
+        allow delete: if isAdminOf(restauranteId);
+      }
+    }
+
+    match /qrCodes/{qrToken} {
+      // El comensal escanea el QR sin haber iniciado sesión.
+      allow read: if true;
+      allow create, update: if isAdminOf(request.resource.data.restauranteId);
+      allow delete: if isAdminOf(resource.data.restauranteId);
+    }
+  }
+}

@@ -1,0 +1,147 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource/caprasimo';
+@import '@fontsource-variable/figtree';
+
+/*
+ * Paleta de marca tomada del proyecto Flutter (lib/core/theme/app_colors.dart
+ * y app_theme.dart) para que el panel en React se lea como la misma marca.
+ * Ningún color literal fuera de este archivo: todo componente consume estos
+ * tokens vía las clases de Tailwind (bg-primary, text-foreground, etc).
+ */
+:root {
+  --background: #fdf6f4;
+  --foreground: #2a1520;
+  --card: #ffffff;
+  --card-foreground: #2a1520;
+  --popover: #ffffff;
+  --popover-foreground: #2a1520;
+  --primary: #7f3065;
+  --primary-foreground: #ffffff;
+  --secondary: #ffded8;
+  --secondary-foreground: #2a1520;
+  --muted: #ffded8;
+  --muted-foreground: #6b4a5c;
+  --accent: #dc3148;
+  --accent-foreground: #ffffff;
+  --destructive: #dc3148;
+  --destructive-foreground: #ffffff;
+  --border: #f0d5dc;
+  --input: #f0d5dc;
+  --ring: #7f3065;
+
+  /* Los cinco colores de la paleta, para donde haga falta el color crudo. */
+  --brand-crimson: #dc3148;
+  --brand-plum: #7f3065;
+  --brand-lavender: #ab8fc0;
+  --brand-pink: #edacc4;
+  --brand-blush: #ffded8;
+
+  /* Solo para las pantallas de acceso (login/registro): lienzo más lavado
+     que el fondo general y el degradado del panel de marca. */
+  --auth-canvas: #fdefeb;
+  --auth-field-fill: #fef8f6;
+  --auth-field-border: #f3dcd5;
+  --auth-gradient-start: #8a3468;
+  --auth-gradient-end: #48102c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #171014;
+    --foreground: #f5e9ee;
+    --card: #211823;
+    --card-foreground: #f5e9ee;
+    --popover: #211823;
+    --popover-foreground: #f5e9ee;
+    --primary: #c77fae;
+    --primary-foreground: #171014;
+    --secondary: #2c1f2e;
+    --secondary-foreground: #f5e9ee;
+    --muted: #2c1f2e;
+    --muted-foreground: #c0a8b4;
+    --accent: #f2687c;
+    --accent-foreground: #171014;
+    --destructive: #f2687c;
+    --destructive-foreground: #171014;
+    --border: #3a2a38;
+    --input: #3a2a38;
+    --ring: #c77fae;
+
+    --auth-canvas: #201319;
+    --auth-field-fill: #2b1a21;
+    --auth-field-border: #3a2530;
+  }
+}
+
+@theme inline {
+  /* Dos familias con roles separados, como en el panel Flutter:
+     Caprasimo para títulos y la marca, Figtree para todo el resto. */
+  --font-sans: 'Figtree Variable', 'Figtree', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: 'Caprasimo', ui-serif, Georgia, serif;
+
+  /* Único radio de esquina de la app, como en Flutter (kRadius = 8). */
+  --radius: 0.5rem;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-brand-crimson: var(--brand-crimson);
+  --color-brand-plum: var(--brand-plum);
+  --color-brand-lavender: var(--brand-lavender);
+  --color-brand-pink: var(--brand-pink);
+  --color-brand-blush: var(--brand-blush);
+
+  --color-auth-canvas: var(--auth-canvas);
+  --color-auth-field-fill: var(--auth-field-fill);
+  --color-auth-field-border: var(--auth-field-border);
+  --color-auth-gradient-start: var(--auth-gradient-start);
+  --color-auth-gradient-end: var(--auth-gradient-end);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Tailwind saca el cursor: pointer por defecto de los botones; lo
+     restauramos acá una sola vez para toda la app en vez de agregar
+     `cursor-pointer` botón por botón. */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+}
+
+/* Imprimir un modal (ej. el código QR de una mesa): los Dialog de Radix
+   portan su contenido fuera de `#root`, directo a `document.body`, así que
+   ocultar `#root` y el overlay alcanza para que solo se imprima el
+   contenido del modal abierto (el resto del modal se oculta con
+   `print:hidden` en cada instancia). */
+@media print {
+  #root,
+  [data-slot='dialog-overlay'] {
+    display: none !important;
+  }
+}
