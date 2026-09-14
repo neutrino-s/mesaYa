@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { createRng } from './random.js'
 import {
+  generarCasosQA,
   generarPedidosParaMesas,
   type GrupoOpcionesSeed,
   type MesaSeed,
@@ -139,6 +140,12 @@ for (const seed of [1, 2, 3, 42, 12345]) {
       pedido.updatedAtMs >= pedido.createdAtMs && pedido.updatedAtMs <= opts.ahoraMs,
       'updatedAt entre createdAt y ahora',
     )
+    // El pedido debe "verse" generado el día de la corrida del script.
+    assert.equal(
+      new Date(pedido.createdAtMs).toDateString(),
+      new Date(opts.ahoraMs).toDateString(),
+      'createdAt debe ser la fecha de hoy (día de la corrida del script)',
+    )
     if (pedido.estado === 'pendiente') {
       assert.equal(pedido.updatedAtMs, pedido.createdAtMs, 'pendiente: todavía no pasó nada desde que se creó')
     }
@@ -195,6 +202,87 @@ for (const seed of [1, 2, 3, 42, 12345]) {
 // estados — si nunca aparece alguno, `ESTADOS_POSIBLES_PONDERADOS` está mal armado.
 for (const estado of TODOS_LOS_ESTADOS) {
   assert.ok(estadosVistos.has(estado), `el estado "${estado}" nunca apareció en ninguna semilla probada`)
+}
+
+// ── "Hoy" incluso corriendo pegado a la medianoche ──────────────────────────
+// Fuerza `ahoraMs` a 00:10 de un día fijo: con el margen de solo 10 minutos
+// desde las 00:00, la duración deseada (hasta 90min para "pendiente", o la
+// suma del historial para el resto) casi siempre excede ese margen, así que
+// esto ejercita de verdad la compresión — no solo de casualidad, como pasaría
+// corriendo con la hora real del día.
+{
+  const ahoraCercaDeMedianocheMs = new Date(2026, 5, 15, 0, 10, 0).getTime()
+  const inicioDeEseDiaMs = new Date(2026, 5, 15, 0, 0, 0).getTime()
+  const optsMedianoche = { ...opts, ahoraMs: ahoraCercaDeMedianocheMs }
+
+  for (const seed of [1, 2, 3, 42, 12345]) {
+    const rng = createRng(seed)
+    const pedidos = generarPedidosParaMesas(mesas, productos, mozos, rng, optsMedianoche)
+    for (const pedido of pedidos) {
+      assert.ok(pedido.createdAtMs >= inicioDeEseDiaMs, 'medianoche: createdAt nunca antes de las 00:00 de hoy')
+      assert.ok(pedido.updatedAtMs <= ahoraCercaDeMedianocheMs, 'medianoche: updatedAt nunca en el futuro')
+      assert.equal(
+        new Date(pedido.createdAtMs).toDateString(),
+        new Date(ahoraCercaDeMedianocheMs).toDateString(),
+        'medianoche: createdAt sigue siendo el día de la corrida',
+      )
+      const historial = pedido.historialEstados
+      for (let i = 1; i < historial.length; i++) {
+        assert.ok(historial[i].enMs >= historial[i - 1].enMs, 'medianoche: el historial comprimido no retrocede')
+      }
+    }
+  }
+}
+
+// ── generarCasosQA: cantidad EXACTA por estado (set de pruebas de QA) ──────
+
+const ESTADOS_QA: readonly PedidoEstado[] = ['pendiente', 'en_preparacion', 'listo', 'entregado']
+const CANTIDAD_POR_ESTADO_QA = 50
+
+for (const seed of [1, 2, 3, 42, 12345]) {
+  const rng = createRng(seed)
+  const casosQA = generarCasosQA(mesas, productos, mozos, rng, {
+    estados: ESTADOS_QA,
+    cantidadPorEstado: CANTIDAD_POR_ESTADO_QA,
+    itemsMax: opts.itemsMax,
+    minutosAtrasMin: opts.minutosAtrasMin,
+    minutosAtrasMax: opts.minutosAtrasMax,
+    ahoraMs: opts.ahoraMs,
+  })
+
+  assert.equal(casosQA.length, ESTADOS_QA.length * CANTIDAD_POR_ESTADO_QA, 'un pedido por cada (estado, repetición) pedidos')
+
+  const conteoPorEstado = new Map<PedidoEstado, number>()
+  for (const pedido of casosQA) {
+    conteoPorEstado.set(pedido.estado, (conteoPorEstado.get(pedido.estado) ?? 0) + 1)
+
+    // Nunca dos líneas del mismo producto — misma regla de agrupación que
+    // el modo random (ver arriba).
+    const productoIds = pedido.items.map((item) => item.productoId)
+    assert.equal(new Set(productoIds).size, productoIds.length, 'QA: no hay productoId repetido entre los items')
+
+    // El historial siempre pasa por todos los estados intermedios en orden,
+    // nunca "salta" directo al estado final — ej. un pedido "listo" trae
+    // también `pendiente` y `en_preparacion` en su historial.
+    const historial = pedido.historialEstados
+    const indiceFinal = ESTADOS_QA.indexOf(pedido.estado)
+    assert.equal(historial.length, indiceFinal + 1, `QA "${pedido.estado}": el historial debe tener un paso por cada estado hasta el final`)
+    for (let i = 0; i < historial.length; i++) {
+      assert.equal(historial[i].estado, ESTADOS_QA[i], `QA "${pedido.estado}": paso ${i} del historial debe ser "${ESTADOS_QA[i]}"`)
+      if (i > 0) assert.ok(historial[i].enMs > historial[i - 1].enMs, 'QA: cada paso del historial es estrictamente posterior al anterior')
+    }
+    assert.ok(historial[historial.length - 1].enMs <= opts.ahoraMs, 'QA: ninguna entrada del historial puede ser futura')
+    assert.equal(pedido.motivoCancelacion, null, 'QA: estos 4 estados nunca requieren motivoCancelacion')
+    assert.equal(
+      new Date(pedido.createdAtMs).toDateString(),
+      new Date(opts.ahoraMs).toDateString(),
+      'QA: createdAt debe ser la fecha de hoy (día de la corrida del script)',
+    )
+  }
+
+  for (const estado of ESTADOS_QA) {
+    assert.equal(conteoPorEstado.get(estado), CANTIDAD_POR_ESTADO_QA, `QA: deben ser exactamente ${CANTIDAD_POR_ESTADO_QA} pedidos en "${estado}"`)
+  }
 }
 
 console.log('OK: pedidoGenerator.selftest.ts — todas las aserciones pasaron.')

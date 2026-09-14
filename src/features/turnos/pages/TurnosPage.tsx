@@ -46,15 +46,12 @@ export function TurnosPage() {
     <div className="flex flex-1 flex-col gap-6 px-4 pt-8 pb-6 sm:px-6">
       <header>
         <h1 className="font-heading text-2xl text-foreground">Jornadas</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Horario del local, cuadrante de turnos, fichaje, solicitudes y métricas del equipo.
-        </p>
       </header>
 
       <Tabs defaultValue={initialTab} className="flex flex-col gap-6">
         <TabsList>
           <TabsTrigger value="horario">Horario del local</TabsTrigger>
-          <TabsTrigger value="cuadrantes">Cuadrantes</TabsTrigger>
+          <TabsTrigger value="cuadrantes">Calendario</TabsTrigger>
           <TabsTrigger value="fichaje">Fichaje</TabsTrigger>
           <TabsTrigger value="solicitudes">Solicitudes</TabsTrigger>
           <TabsTrigger value="metricas">Métricas</TabsTrigger>

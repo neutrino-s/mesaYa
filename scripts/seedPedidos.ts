@@ -14,7 +14,9 @@
  * `ESTADOS_POSIBLES_PONDERADOS` en `scripts/lib/pedidoGenerator.ts`. Cada
  * pedido trae además `historialEstados`: el timeline completo de
  * transiciones que atravesó, con un timestamp plausible por cada una (ver
- * `docs/database-schema.md#pedido--comanda`).
+ * `docs/database-schema.md#pedido--comanda`). `createdAt`/todo el
+ * historial siempre caen en el día calendario en que corrés el script
+ * (nunca "ayer", aunque lo corras pegado a la medianoche).
  *
  * Escribe directo con el Admin SDK (bypasea `firestore.rules`), como
  * cualquier script de seed — no pasa por ninguna Cloud Function ni por la
@@ -45,6 +47,20 @@
  *   --dry-run                 No escribe nada en Firestore: imprime un resumen y guarda el detalle en scripts/output/.
  *   --listar-restaurantes     Lista los restaurantes disponibles (id + nombre) y termina.
  *   --help                    Muestra esta ayuda.
+ *
+ * ── Modo "set de pruebas de QA" ──────────────────────────────────────────
+ *   Genera una cantidad EXACTA de pedidos por estado (a diferencia del modo
+ *   default de arriba, que sortea el estado ponderado y ata la cantidad a
+ *   las mesas). Ignora --pedidos-max. Cada pedido trae igual su
+ *   `historialEstados` completo y plausible (pasa por todos los estados
+ *   intermedios antes de llegar al final).
+ *   --casos-qa                Activa este modo.
+ *   --casos-por-estado <n>    Pedidos a generar por cada estado (default: 50).
+ *   --estados-qa <lista>      Estados a cubrir, separados por coma
+ *                             (default: pendiente,en_preparacion,listo,entregado).
+ *
+ *   Ejemplo (50 pedidos en cada uno de los 4 estados operativos):
+ *     npm run seed:pedidos -- --restaurante XrLUTOIT5vOGm6jnqM3k --casos-qa --dry-run
  */
 import { cert, getApps, initializeApp, applicationDefault } from 'firebase-admin/app'
 import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore'
@@ -54,13 +70,38 @@ import { resolve } from 'node:path'
 
 import { chunk, createRng } from './lib/random.js'
 import {
+  generarCasosQA,
   generarPedidosParaMesas,
   type GrupoOpcionesSeed,
   type MesaSeed,
+  type PedidoEstado,
   type PedidoSeed,
   type ProductoSeed,
   type StaffSeed,
 } from './lib/pedidoGenerator.js'
+
+/** Default de `--estados-qa`: los 4 estados operativos del flujo cocina/salón
+ * (deja afuera `pagado`/`cancelado`, que no forman parte de ese flujo). */
+const ESTADOS_QA_DEFAULT: readonly PedidoEstado[] = ['pendiente', 'en_preparacion', 'listo', 'entregado']
+const TODOS_LOS_ESTADOS: readonly PedidoEstado[] = [
+  'pendiente',
+  'en_preparacion',
+  'listo',
+  'entregado',
+  'pagado',
+  'cancelado',
+]
+
+function parseEstadosQA(raw: string | undefined): PedidoEstado[] {
+  if (!raw) return [...ESTADOS_QA_DEFAULT]
+  const estados = raw.split(',').map((s) => s.trim())
+  for (const estado of estados) {
+    if (!TODOS_LOS_ESTADOS.includes(estado as PedidoEstado)) {
+      throw new Error(`--estados-qa: "${estado}" no es un estado válido (${TODOS_LOS_ESTADOS.join(', ')}).`)
+    }
+  }
+  return estados as PedidoEstado[]
+}
 
 // ── CLI args ────────────────────────────────────────────────────────────
 
@@ -76,6 +117,9 @@ interface Args {
   dryRun: boolean
   listarRestaurantes: boolean
   help: boolean
+  casosQA: boolean
+  casosPorEstado: number
+  estadosQA?: string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -107,6 +151,9 @@ function parseArgs(argv: string[]): Args {
     dryRun: Boolean(raw['dry-run']),
     listarRestaurantes: Boolean(raw['listar-restaurantes']),
     help: Boolean(raw.help),
+    casosQA: Boolean(raw['casos-qa']),
+    casosPorEstado: Math.max(1, num('casos-por-estado', 50)),
+    estadosQA: str('estados-qa'),
   }
 }
 
@@ -365,15 +412,41 @@ async function main() {
     }
   }
 
+  let estadosQA: PedidoEstado[] = []
+  if (args.casosQA) {
+    try {
+      estadosQA = parseEstadosQA(args.estadosQA)
+    } catch (error) {
+      console.error((error as Error).message)
+      process.exitCode = 1
+      return
+    }
+  }
+
   const rng = createRng(args.seed)
-  const pedidos = generarPedidosParaMesas(mesasAUsar, productos, mozos, rng, {
-    pedidosMax: args.pedidosMax,
-    itemsMax: args.itemsMax,
-    minutosAtrasMin: 5,
-    minutosAtrasMax: 90,
-    ahoraMs: Date.now(),
-  })
+  const pedidos = args.casosQA
+    ? generarCasosQA(mesasAUsar, productos, mozos, rng, {
+        estados: estadosQA,
+        cantidadPorEstado: args.casosPorEstado,
+        itemsMax: args.itemsMax,
+        minutosAtrasMin: 5,
+        minutosAtrasMax: 90,
+        ahoraMs: Date.now(),
+      })
+    : generarPedidosParaMesas(mesasAUsar, productos, mozos, rng, {
+        pedidosMax: args.pedidosMax,
+        itemsMax: args.itemsMax,
+        minutosAtrasMin: 5,
+        minutosAtrasMax: 90,
+        ahoraMs: Date.now(),
+      })
   const mesasConPedido = new Set(pedidos.map((p) => p.mesaId))
+
+  if (args.casosQA) {
+    console.log(
+      `Modo set de pruebas de QA: ${args.casosPorEstado} pedidos × ${estadosQA.length} estados (${estadosQA.join(', ')}) = ${pedidos.length} pedidos en total.`,
+    )
+  }
 
   imprimirResumen(pedidos, mesasConPedido)
 

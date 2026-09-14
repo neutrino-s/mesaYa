@@ -270,11 +270,15 @@ export interface GenerarPedidoOpts {
   ahoraMs: number
 }
 
-function crearPedido(
+/** Arma un pedido para `estado` ya decidido (no lo sortea) — usado tanto por
+ * `crearPedido` (sorteo ponderado, modo "poblar el tablero") como por
+ * `generarCasosQA` (cantidad exacta por estado, modo "set de pruebas"). */
+function crearPedidoConEstado(
   mesa: MesaSeed,
   productos: readonly ProductoSeed[],
   mozos: readonly StaffSeed[],
   rng: () => number,
+  estado: PedidoEstado,
   opts: GenerarPedidoOpts,
 ): PedidoSeed {
   const cantidadItems = randomInt(rng, 1, opts.itemsMax)
@@ -283,7 +287,6 @@ function crearPedido(
   const productosElegidos = elegirNSinRepetir(rng, productos, cantidadItems)
   const items = productosElegidos.map((producto) => crearItem(producto, rng))
   const total = totalDeItems(items)
-  const estado = pickRandom(rng, ESTADOS_POSIBLES_PONDERADOS)
   const origen: PedidoOrigen = rng() < 0.7 ? 'comensal' : 'mozo'
 
   const { historial, motivoCancelacion } = construirHistorial(estado, rng)
@@ -291,12 +294,21 @@ function crearPedido(
   // de siempre, para dar variación entre pedidos recién llegados. El resto
   // deriva su `createdAt` de cuánto tardó realmente en recorrer el
   // historial, así ningún timestamp queda en el futuro.
-  const duracionTotalMin =
+  const duracionDeseadaMin =
     historial.length > 1 ? historial[historial.length - 1].minutosAcumulados : randomInt(rng, opts.minutosAtrasMin, opts.minutosAtrasMax)
-  const createdAtMs = opts.ahoraMs - duracionTotalMin * 60_000
+  // El pedido debe "verse" generado el día de la corrida del script (hoy):
+  // si `duracionDeseadaMin` retrocede antes de las 00:00 de hoy (corridas
+  // muy cerca de la medianoche), se comprime proporcionalmente toda la
+  // duración para que `createdAt` y el resto del historial queden dentro
+  // de "hoy", sin perder el orden relativo de las transiciones.
+  const inicioHoyMs = new Date(opts.ahoraMs).setHours(0, 0, 0, 0)
+  const margenDisponibleMin = Math.max((opts.ahoraMs - inicioHoyMs) / 60_000, 0)
+  const factorHoy =
+    duracionDeseadaMin > margenDisponibleMin && duracionDeseadaMin > 0 ? margenDisponibleMin / duracionDeseadaMin : 1
+  const createdAtMs = opts.ahoraMs - duracionDeseadaMin * factorHoy * 60_000
   const historialEstados: PedidoHistorialEntradaSeed[] = historial.map((paso) => ({
     estado: paso.estado,
-    enMs: createdAtMs + paso.minutosAcumulados * 60_000,
+    enMs: createdAtMs + paso.minutosAcumulados * factorHoy * 60_000,
   }))
   const updatedAtMs = historialEstados[historialEstados.length - 1].enMs
 
@@ -317,6 +329,18 @@ function crearPedido(
     createdAtMs,
     updatedAtMs,
   }
+}
+
+/** Sortea el estado (ponderado hacia "en cocina") y arma el pedido — modo
+ * "poblar el tablero en vivo" de siempre. */
+function crearPedido(
+  mesa: MesaSeed,
+  productos: readonly ProductoSeed[],
+  mozos: readonly StaffSeed[],
+  rng: () => number,
+  opts: GenerarPedidoOpts,
+): PedidoSeed {
+  return crearPedidoConEstado(mesa, productos, mozos, rng, pickRandom(rng, ESTADOS_POSIBLES_PONDERADOS), opts)
 }
 
 export interface GenerarPedidosOpts {
@@ -341,6 +365,48 @@ export function generarPedidosParaMesas(
     const cantidadPedidos = randomInt(rng, 1, opts.pedidosMax)
     for (let i = 0; i < cantidadPedidos; i++) {
       pedidos.push(crearPedido(mesa, productos, mozos, rng, opts))
+    }
+  }
+  return pedidos
+}
+
+export interface GenerarCasosQAOpts {
+  /** Estados a cubrir, cada uno con exactamente `cantidadPorEstado` pedidos
+   * — pensado para los 4 estados operativos del flujo de cocina/salón
+   * (`pendiente`, `en_preparacion`, `listo`, `entregado`); no obliga a
+   * incluir `pagado`/`cancelado` si el set de pruebas no los necesita. */
+  estados: readonly PedidoEstado[]
+  cantidadPorEstado: number
+  itemsMax: number
+  minutosAtrasMin: number
+  minutosAtrasMax: number
+  ahoraMs: number
+}
+
+/** Set de pruebas de QA: exactamente `cantidadPorEstado` pedidos por cada
+ * estado de `opts.estados` (a diferencia de `generarPedidosParaMesas`, acá
+ * el estado no se sortea — se fija). Cicla las mesas reales del restaurante
+ * round-robin en un único contador compartido entre todos los estados (no
+ * uno por estado), así la distribución de mesas queda pareja en vez de que
+ * las primeras mesas concentren siempre el primer estado de la lista; una
+ * mesa puede terminar con más de un pedido de prueba, cosa válida en el
+ * modelo actual (`Mesa.pedidoActivoId` sigue 🔴 pendiente, no hay unicidad
+ * que romper — ver `docs/database-schema.md#pedido--comanda`). Pura — no
+ * toca Firestore. */
+export function generarCasosQA(
+  mesas: readonly MesaSeed[],
+  productos: readonly ProductoSeed[],
+  mozos: readonly StaffSeed[],
+  rng: () => number,
+  opts: GenerarCasosQAOpts,
+): PedidoSeed[] {
+  const pedidos: PedidoSeed[] = []
+  let contadorMesa = 0
+  for (const estado of opts.estados) {
+    for (let i = 0; i < opts.cantidadPorEstado; i++) {
+      const mesa = mesas[contadorMesa % mesas.length]
+      contadorMesa++
+      pedidos.push(crearPedidoConEstado(mesa, productos, mozos, rng, estado, opts))
     }
   }
   return pedidos

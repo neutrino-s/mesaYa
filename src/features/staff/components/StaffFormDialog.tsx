@@ -299,7 +299,7 @@ export function StaffFormDialog({
                 <p className="text-xs text-destructive">{errors.horasSemanalesContrato.message}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Se usa en Jornadas › Cuadrantes para avisar si el cuadrante planificado supera el tope
+                  Se usa en Jornadas › Calendario para avisar si el cuadrante planificado supera el tope
                   contractual de este colaborador.
                 </p>
               )}
